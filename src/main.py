@@ -1,12 +1,16 @@
 import argparse
+import os
 import sys
 import tempfile
 import time
 import zipfile
+from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
+import pandas as pd
+import pytrec_eval
 from loguru import logger
 
 SUBMISSIONS = 3
@@ -79,20 +83,73 @@ def extract_files(input_folder: Path, output_folder: Path) -> None:
         progress_bar()
 
 
+def calculate_metrics(
+    qrel: defaultdict[Any, dict],
+    run_file: Path,
+    metrics: set[str] | None = None,
+) -> tuple[float, float]:
+    if metrics is None:
+        metrics = {"map", "P_5"}
+
+    with run_file.open("r") as f_run:
+        run = pytrec_eval.parse_run(f_run)
+
+    evaluator = pytrec_eval.RelevanceEvaluator(qrel, metrics)
+
+    evaluation = evaluator.evaluate(run)
+
+    return evaluation["map"], evaluation["p_5"]
+
+
 def main() -> None:
+    columns = ["Team", "Run", "MAP", "P@5"]
+    results = pd.DataFrame(columns=columns)
     logger.info("Starting")
     args = parse_args()
     input_folder = Path(args.input)
     output_folder = args.output
     qrels_file = Path(args.qrels)
+
     if not qrels_file.exists() or not qrels_file.is_file():
         logger.error("Qrels file does not exist")
         return
+
+    with qrels_file.open("r") as q_file:
+        qrel = pytrec_eval.parse_qrel(q_file)
+
     if output_folder is None:
         logger.debug("Setting temp folder")
         output_folder = tempfile.mkstemp()
+
     output_folder = Path(output_folder)
+    if not output_folder.exists():
+        logger.error("Output folder does not exist")
+        return
+
+    if not output_folder.is_dir():
+        logger.error("Output folder is not a directory")
+        return
+
+    if len(list(output_folder.iterdir())) != 0:
+        logger.error("Output folder is not empty")
+        return
+
     extract_files(input_folder, output_folder)
+
+    for entry in os.listdir(output_folder):
+        team_folder = output_folder / entry
+        if not team_folder.is_dir():
+            logger.warning("Something went wrong here")
+        for run in os.listdir(team_folder):
+            run_name = run.split(".")[0]
+            ap, p_5 = calculate_metrics(qrel, team_folder / run)
+            record = {
+                "Team": entry,
+                "Run": run_name,
+                "MAP": ap,
+                "P@5": p_5,
+            }
+            results = results.append(record, ignore_index=True)
 
 
 if __name__ == "__main__":
