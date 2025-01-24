@@ -77,8 +77,8 @@ def calculate_metrics(
 
     evaluation = evaluator.evaluate(run)
 
-    ap = np.average([entry["map"] for entry in evaluation.values()])
-    p_5 = np.average([entry["P_5"] for entry in evaluation.values()])
+    ap = np.average([entry["map"] for entry in evaluation.values()]).round(decimals=6)
+    p_5 = np.average([entry["P_5"] for entry in evaluation.values()]).round(decimals=6)
 
     return float(ap), float(p_5)
 
@@ -163,9 +163,9 @@ def main() -> None:
         print_table(sorted_results)
 
     else:
-        output_file = output_folder / "sorted_results.csv"
-        sorted_results.to_csv(output_file)
-        logger.info(f"Saved results to {output_file}")
+        sorted_results.to_csv(output_folder / "sorted_results.csv")
+        results.to_csv(output_folder / "results.csv")
+        logger.info(f"Saved results to {output_folder}")
 
     print_table(results, title="All results, unsorted")
 
