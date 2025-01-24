@@ -1,48 +1,20 @@
 import argparse
-import os
-import sys
+import shutil
 import tempfile
-import time
 import zipfile
 from collections import defaultdict
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytrec_eval
 from loguru import logger
+from rich.console import Console
+from rich.table import Table
 
 SUBMISSIONS = 3
-
-
-def progressbar(
-    count: int,
-    prefix: str = "",
-    size: int = 60,
-    out: TextIO = sys.stdout,
-) -> Callable:
-    start = time.time()  # time estimate start
-    progress = 0.1
-
-    def advance() -> float:
-        nonlocal progress
-        x = int(size * progress / count)
-        # time estimate calculation and string
-        remaining = ((time.time() - start) / progress) * (count - progress)
-        mins, sec = divmod(remaining, 60)  # limited to minutes
-        time_str = f"{int(mins):02}:{sec:03.1f}"
-        print(
-            f"{prefix}[{'█' * x}{('.' * (size - x))}] "
-            f"{int(progress)}/{count} Est wait {time_str}",
-            end="\r",
-            file=out,
-            flush=True,
-        )
-        progress += 1
-        return progress
-
-    return advance
+VALID_SUFFIXES = [".res", ".txt"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,22 +37,29 @@ def parse_args() -> argparse.Namespace:
 
 
 def extract_files(input_folder: Path, output_folder: Path) -> None:
+    logger.info("Extracting zip files")
     files = input_folder.glob("*.zip")
-    progress_bar = progressbar(len(list(files)))
     for zip_file in files:
-        full_path = input_folder / zip_file
-        team_name = full_path.stem
-        if not zipfile.is_zipfile(full_path):
+        team_name = zip_file.stem
+        if not zipfile.is_zipfile(zip_file):
             continue
-        with zipfile.ZipFile(full_path, "r") as zip_ref:
-            if len(zip_ref.infolist()) != SUBMISSIONS:
+
+        with zipfile.ZipFile(zip_file, "r") as zip_ref:
+            submissions = 0
+            for member in zip_ref.infolist():
+                if "MACOSX" in member.filename:
+                    continue
+
+                file_extension = member.filename.split(".")[-1]
+                if f".{file_extension}" in VALID_SUFFIXES:
+                    submissions += 1
+            if submissions != SUBMISSIONS:
                 logger.error(f"{team_name} didn't submit 3 results")
                 continue
             output_zip_folder = output_folder / team_name
             output_zip_folder.mkdir(exist_ok=True)
 
-            zip_ref.extractall(output_folder)
-        progress_bar()
+            zip_ref.extractall(output_zip_folder)
 
 
 def calculate_metrics(
@@ -98,13 +77,50 @@ def calculate_metrics(
 
     evaluation = evaluator.evaluate(run)
 
-    return evaluation["map"], evaluation["p_5"]
+    ap = np.average([entry["map"] for entry in evaluation.values()])
+    p_5 = np.average([entry["P_5"] for entry in evaluation.values()])
+
+    return float(ap), float(p_5)
+
+
+def get_table(qrel: defaultdict[Any, dict], folder: Path) -> pd.DataFrame:
+    columns = ["Team", "Run", "MAP", "P@5"]
+    results = pd.DataFrame(columns=columns)
+    logger.info("Calculating MAP and P@5 for each run")
+    for team_folder in folder.iterdir():
+        if not team_folder.is_dir():
+            continue
+
+        for run in team_folder.iterdir():
+            if run.suffix not in [".res", ".txt"]:
+                continue
+
+            ap, p_5 = calculate_metrics(qrel, run)
+            record = {
+                "Team": team_folder.name,
+                "Run": run.stem,
+                "MAP": ap,
+                "P@5": p_5,
+            }
+            results = pd.concat([results, pd.DataFrame([record])], ignore_index=True)
+    return results
+
+
+def print_table(results: pd.DataFrame, title: str = "Winners") -> None:
+    console = Console()
+    table = Table(title=title)
+    table.add_column("Index")
+    for col in results.columns:
+        table.add_column(col)
+
+    for index, row in results.iterrows():
+        table.add_row(str(index), *map(str, row))
+
+    console.print(table)
 
 
 def main() -> None:
     logger.info("Starting")
-    columns = ["Team", "Run", "MAP", "P@5"]
-    results = pd.DataFrame(columns=columns)
     args = parse_args()
     input_folder = Path(args.input)
     output_folder = args.output
@@ -119,7 +135,7 @@ def main() -> None:
 
     if output_folder is None:
         logger.debug("Setting temp folder")
-        output_folder = tempfile.mkstemp()
+        output_folder = tempfile.mkdtemp()
 
     output_folder = Path(output_folder)
     if not output_folder.exists():
@@ -135,29 +151,23 @@ def main() -> None:
         return
 
     extract_files(input_folder, output_folder)
-
-    for entry in os.listdir(output_folder):
-        team_folder = output_folder / entry
-        if not team_folder.is_dir():
-            logger.warning("Something went wrong here")
-        for run in os.listdir(team_folder):
-            run_name = run.split(".")[0]
-            ap, p_5 = calculate_metrics(qrel, team_folder / run)
-            record = {
-                "Team": entry,
-                "Run": run_name,
-                "MAP": ap,
-                "P@5": p_5,
-            }
-            results = results.append(record, ignore_index=True)
-
+    results = get_table(qrel, output_folder)
     logger.info(f"Average MAP for all off the class is {results["MAP"].mean()}")
     sorted_results = results.sort_values(
-        by=["MAP", "P_5"],
+        by=["MAP", "P@5"],
         ascending=[False, False],
     ).drop_duplicates(["Team"])
 
-    sorted_results.to_csv(output_folder / "results.csv", index=True)
+    if args.output is None:
+        shutil.rmtree(output_folder)
+        print_table(sorted_results)
+
+    else:
+        output_file = output_folder / "sorted_results.csv"
+        sorted_results.to_csv(output_file)
+        logger.info(f"Saved results to {output_file}")
+
+    print_table(results, title="All results, unsorted")
 
 
 if __name__ == "__main__":
