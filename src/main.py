@@ -113,7 +113,6 @@ def print_table(results: pd.DataFrame, title: str = "Winners") -> None:
     table.add_column("Index")
     for col in results.columns:
         table.add_column(col)
-
     for index, row in results.iterrows():
         table.add_row(str(index), *map(str, row))
 
@@ -161,13 +160,11 @@ def main() -> None:
 
     if args.output is None:
         shutil.rmtree(output_folder)
-        print_table(sorted_results)
-
     else:
         sorted_results.to_csv(output_folder / "sorted_results.csv")
         results.to_csv(output_folder / "results.csv")
         logger.info(f"Saved results to {output_folder}")
-
+    print_table(sorted_results)
     print_table(results, title="All results, unsorted")
 
 
