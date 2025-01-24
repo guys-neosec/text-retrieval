@@ -102,9 +102,9 @@ def calculate_metrics(
 
 
 def main() -> None:
+    logger.info("Starting")
     columns = ["Team", "Run", "MAP", "P@5"]
     results = pd.DataFrame(columns=columns)
-    logger.info("Starting")
     args = parse_args()
     input_folder = Path(args.input)
     output_folder = args.output
@@ -150,6 +150,14 @@ def main() -> None:
                 "P@5": p_5,
             }
             results = results.append(record, ignore_index=True)
+
+    logger.info(f"Average MAP for all off the class is {results["MAP"].mean()}")
+    sorted_results = results.sort_values(
+        by=["MAP", "P_5"],
+        ascending=[False, False],
+    ).drop_duplicates(["Team"])
+
+    sorted_results.to_csv(output_folder / "results.csv", index=True)
 
 
 if __name__ == "__main__":
