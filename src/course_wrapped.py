@@ -85,6 +85,7 @@ class CourseWrapped(Scene):
         self.play(FadeOut(highlights_text))
 
         # 3. Key Terms with Enhanced Randomized "Pop" Effect
+        # TODO(Eilon): Change to something you like
         key_terms = [
             "tf-idf",
             "rm3",
