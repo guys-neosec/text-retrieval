@@ -30,7 +30,8 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default=None,
         help="Output Directory for "
-        "extracted folders, if not specified. create a temporary folder ",
+        "extracted folders, if not specified. create a temporary folder and deletes "
+        "it right after",
     )
     parser.add_argument("-q", "--qrels", help="Qrels file")
     return parser.parse_args()
