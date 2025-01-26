@@ -42,25 +42,33 @@ def extract_files(input_folder: Path, output_folder: Path) -> None:
     files = input_folder.glob("*.zip")
     for zip_file in files:
         team_name = zip_file.stem
+
         if not zipfile.is_zipfile(zip_file):
             continue
 
+        output_zip_folder = output_folder / team_name
+        output_zip_folder.mkdir(exist_ok=True)
+
         with zipfile.ZipFile(zip_file, "r") as zip_ref:
             submissions = 0
-            for member in zip_ref.infolist():
-                if "MACOSX" in member.filename:
+            for file_entry in zip_ref.infolist():
+                if "MACOSX" in file_entry.filename:
+                    continue
+                if file_entry.is_dir():
                     continue
 
-                file_extension = member.filename.split(".")[-1]
-                if f".{file_extension}" in VALID_SUFFIXES:
-                    submissions += 1
+                file_extension = file_entry.filename.split(".")[-1]
+
+                if f".{file_extension}" not in VALID_SUFFIXES:
+                    continue
+
+                submissions += 1
+                file_entry.filename = Path(file_entry.filename).name
+                zip_ref.extract(file_entry, output_zip_folder)
+
             if submissions != SUBMISSIONS:
                 logger.error(f"{team_name} didn't submit 3 results")
                 continue
-            output_zip_folder = output_folder / team_name
-            output_zip_folder.mkdir(exist_ok=True)
-
-            zip_ref.extractall(output_zip_folder)
 
 
 def calculate_metrics(
@@ -93,7 +101,7 @@ def get_table(qrel: defaultdict[Any, dict], folder: Path) -> pd.DataFrame:
             continue
 
         for run in team_folder.iterdir():
-            if run.suffix not in [".res", ".txt"]:
+            if run.suffix not in VALID_SUFFIXES:
                 continue
 
             ap, p_5 = calculate_metrics(qrel, run)
